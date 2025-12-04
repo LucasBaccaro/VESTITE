@@ -1,0 +1,14 @@
+# Copia este archivo como 'local.properties' y completa con tus valores reales
+# IMPORTANTE: 'local.properties' está en .gitignore - NUNCA lo subas a git
+
+# Android SDK
+sdk.dir=/Users/tu-usuario/Library/Android/sdk
+
+# Supabase Configuration
+# Obtén estos valores desde: https://app.supabase.com/project/_/settings/api
+supabase.url=https://your-project-id.supabase.co
+supabase.anon.key=your-anon-key-here
+
+# Ejemplo:
+# supabase.url=https://xyzcompany.supabase.co
+# supabase.anon.key=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
