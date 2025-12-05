@@ -38,10 +38,14 @@ sharedUI/src/commonMain/kotlin/baccaro/vestite/app/
 **Current Features:**
 - `authentication/` - Email/password y Google Sign-In nativo con KMPAuth
 - `wardrobe/` - Guardarropa con análisis AI y gestión de prendas
+- `profile/` - Perfil de usuario con logout
+- `looks/` - Outfits guardados (stub)
+- `aiGeneration/` - Generación AI de outfits (stub)
+- `chat/` - Asistente IA de estilo (stub)
 
 **Future Features:**
 - `tryon/` - Virtual Try-On con Gemini 3 Pro
-- `assistant/` - AI stylist
+- `assistant/` - AI stylist con chat completo
 
 ## Tech Stack
 
@@ -550,46 +554,127 @@ val wardrobeModule = module {
 }
 ```
 
+### Navigation Architecture
+
+**Arquitectura con BottomBar:**
+```
+Auth Screens (Login/Register)
+    ↓
+MainScreen (Scaffold con BottomBar)
+    ├─ Home Tab (con FAB y TopAppBar)
+    ├─ Wardrobe Tab (grid de prendas)
+    ├─ Looks Tab (stub)
+    └─ AI Generation Tab (stub)
+
+Secondary Screens (sin BottomBar, con back button)
+    ├─ Profile (desde Home TopAppBar)
+    ├─ Upload Garment (desde Home FAB)
+    ├─ Chat Assistant (desde Home button)
+    └─ Garment Detail (futuro)
+```
+
+**Stack Management:**
+- Navegación entre tabs del BottomBar: NO se acumulan en el stack
+- Solo Home queda en el fondo del stack (presionar back sale de la app)
+- Secondary screens SÍ se acumulan (puedes volver con back button)
+
 ### Navigation Routes
 
 ```kotlin
 sealed class Screen(val route: String) {
-    // ... auth routes
-    data object WardrobeList : Screen("wardrobe_list")
+    // Auth screens
+    data object Login : Screen("login")
+    data object Register : Screen("register")
+
+    // Main screen with BottomBar
+    data object Main : Screen("main")
+
+    // BottomBar destinations (inside Main)
+    sealed class BottomBar(route: String) : Screen(route) {
+        data object Home : BottomBar("home")
+        data object Wardrobe : BottomBar("wardrobe")
+        data object Looks : BottomBar("looks")
+        data object AIGeneration : BottomBar("ai_generation")
+    }
+
+    // Secondary screens (without BottomBar)
+    data object Profile : Screen("profile")
     data object UploadGarment : Screen("upload_garment")
+    data object ChatAssistant : Screen("chat_assistant")
 }
 
-// Home → Wardrobe
+// Login/Register → Main
+LoginScreen(
+    onLoginSuccess = { navController.navigate(Screen.Main.route) }
+)
+
+// MainScreen contiene el BottomBar y maneja navegación interna
+MainScreen(
+    onNavigateToProfile = { navController.navigate(Screen.Profile.route) },
+    onNavigateToUpload = { navController.navigate(Screen.UploadGarment.route) },
+    onNavigateToChatAssistant = { navController.navigate(Screen.ChatAssistant.route) }
+)
+
+// HomeScreen (dentro de MainScreen)
 HomeScreen(
-    onNavigateToWardrobe = { navController.navigate(Screen.WardrobeList.route) }
-)
-
-// Wardrobe → Upload
-WardrobeListScreen(
-    onNavigateToUpload = { navController.navigate(Screen.UploadGarment.route) }
-)
-
-// Upload → selecciona imagen, analiza, guarda
-UploadGarmentScreen(
-    onNavigateBack = { navController.popBackStack() }
+    onNavigateToProfile = onNavigateToProfile,  // TopAppBar icon
+    onNavigateToUpload = onNavigateToUpload,    // FAB
+    onNavigateToChatAssistant = onNavigateToChatAssistant  // Button
 )
 ```
 
 ### UI Components
 
+**MainScreen:**
+- Scaffold con NavigationBar (BottomBar)
+- 4 tabs: Home, Wardrobe, Looks, AI Generation
+- NavHost interno para manejar tabs
+- Stack management optimizado (popUpTo Home)
+
+**HomeScreen:**
+- TopAppBar con título "VESTITE" y icono de perfil (top-right)
+- FAB (+) para agregar prenda rápidamente
+- Botón "Chat con Asistente IA"
+- Información del usuario autenticado
+
 **WardrobeListScreen:**
 - Grid 2 columnas con `LazyVerticalGrid`
-- Filtros por categoría (chips)
-- `SubcomposeAsyncImage` de Coil para cargar imágenes
-- FloatingActionButton para agregar prenda
+- Filtros por categoría (chips: Todas, Superior, Inferior, Calzado)
+- `AsyncImage` de Coil para cargar imágenes
 - Empty state cuando no hay prendas
+- **Sin FAB** (solo en HomeScreen)
 
-**UploadGarmentScreen:**
-- Selector de categoría (chips)
-- Dos botones: "Galería" y "Cámara"
-- Progress indicator durante análisis AI
-- Snackbar de éxito/error
-- Validación: categoría + imagen requeridos
+**UploadGarmentScreen (Nuevo Flujo con Preview):**
+
+**Pantalla 1 - Selección:**
+- Botones centrados: "📁 Galería" y "📷 Cámara"
+- No requiere seleccionar categoría primero
+
+**Pantalla 2 - Analizando:**
+- Loading indicator
+- Texto: "Analizando prenda con IA..."
+
+**Pantalla 3 - Preview y Confirmación:**
+- Card con imagen analizada (aspect ratio 1:1)
+- Card con "Análisis IA":
+  - Descripción generada (ej: "Remera de algodón negra...")
+  - Tipo de ajuste (tight/regular/loose/oversized)
+- Selector de categoría (FilterChips)
+- Botón "Guardar Prenda" (habilitado solo si hay categoría seleccionada)
+
+**Pantalla 4 - Guardando:**
+- Loading indicator
+- Texto: "Guardando prenda..."
+
+**ProfileScreen:**
+- TopAppBar con back button
+- Foto de perfil circular (placeholder)
+- Información del usuario (nombre, email)
+- Botón "Cerrar Sesión" (rojo)
+
+**ChatAssistantScreen:**
+- Placeholder para futuro chat IA
+- TopAppBar con back button
 
 ### Setup Completo
 
@@ -612,15 +697,37 @@ Ver documentación detallada:
 ./gradlew :androidApp:assembleDebug
 ```
 
-**Flujo completo:**
-1. Login → Home → "Ver mi Guardarropa"
-2. Lista vacía → "+" → Upload screen
-3. Seleccionar categoría (Superior/Inferior/Calzado)
-4. Toca "Galería" → Photo Picker → Selecciona foto
-5. O toca "Cámara" → App cámara → Toma foto
-6. Loading: "Analizando prenda con IA..."
-7. Success → Vuelve a lista
+**Flujo completo de navegación:**
+1. **Login** → **MainScreen** (BottomBar visible)
+2. **Home Tab** por defecto:
+   - TopAppBar: "VESTITE" | [Icono Perfil]
+   - FAB: (+)
+   - Botón: "Chat con Asistente IA"
+3. Navegación entre tabs (Home, Wardrobe, Looks, AI Gen) - BottomBar siempre visible
+4. Presionar back desde cualquier tab → **Sale de la app**
+
+**Flujo de upload de prenda (NUEVO):**
+1. Home → FAB (+) → **UploadGarmentScreen**
+2. **Pantalla Inicial**: "📁 Galería" o "📷 Cámara"
+3. Usuario selecciona imagen → **Analizando con IA...** (loading)
+4. **Preview Screen** muestra:
+   - Imagen cargada
+   - Análisis IA: "Remera de algodón negra estampada..."
+   - Ajuste: "regular"
+   - Selector: [Superior] [Inferior] [Calzado]
+5. Usuario selecciona categoría → **"Guardar Prenda"**
+6. **Guardando...** (loading)
+7. Success → Vuelve a Wardrobe tab
 8. Prenda aparece en grid con imagen + descripción AI
+
+**Flujo de perfil:**
+1. Home → Icono perfil (top-right) → **ProfileScreen**
+2. Muestra: foto, nombre, email
+3. Botón: "Cerrar Sesión" → Logout → Login screen
+
+**Flujo de chat:**
+1. Home → "Chat con Asistente IA" → **ChatAssistantScreen**
+2. Placeholder: "Coming Soon"
 
 ## Key Components
 
@@ -639,7 +746,11 @@ Ver documentación detallada:
 - Navegación centralizada con Compose Navigation
 - Observa `isAuthenticated` flow de Supabase
 - Redirige automáticamente según estado de auth
-- Rutas: Login, Register, Home
+- **Rutas principales:**
+  - Auth: Login, Register
+  - Main: Contiene BottomBar (Home, Wardrobe, Looks, AI Generation)
+  - Secondary: Profile, UploadGarment, ChatAssistant
+- **Stack management:** popUpTo para evitar acumulación de tabs
 
 ### LoginScreen.kt
 - Usa `GoogleButtonUiContainer` de KMPAuth
