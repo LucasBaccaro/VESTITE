@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import baccaro.vestite.app.core.di.coreModule
 import baccaro.vestite.app.core.presentation.navigation.AppNavigation
 import baccaro.vestite.app.features.authentication.di.authenticationModule
+import baccaro.vestite.app.features.wardrobe.di.wardrobeModule
 import baccaro.vestite.app.theme.AppTheme
 import com.mmk.kmpauth.google.GoogleAuthCredentials
 import com.mmk.kmpauth.google.GoogleAuthProvider
@@ -43,7 +44,8 @@ fun App(
         application = {
             modules(
                 coreModule,
-                authenticationModule
+                authenticationModule,
+                wardrobeModule
             )
         }
     ) {

@@ -11,6 +11,8 @@ import androidx.navigation.compose.rememberNavController
 import baccaro.vestite.app.features.authentication.domain.repository.AuthRepository
 import baccaro.vestite.app.features.authentication.presentation.login.LoginScreen
 import baccaro.vestite.app.features.authentication.presentation.register.RegisterScreen
+import baccaro.vestite.app.features.wardrobe.presentation.list.WardrobeListScreen
+import baccaro.vestite.app.features.wardrobe.presentation.upload.UploadGarmentScreen
 import baccaro.vestite.app.core.presentation.home.HomeScreen
 import org.koin.compose.koinInject
 
@@ -26,6 +28,8 @@ sealed class Screen(val route: String) {
     data object Login : Screen("login")
     data object Register : Screen("register")
     data object Home : Screen("home")
+    data object WardrobeList : Screen("wardrobe_list")
+    data object UploadGarment : Screen("upload_garment")
 }
 
 /**
@@ -136,10 +140,31 @@ fun AppNavigation(
         // Pantalla Home
         composable(Screen.Home.route) {
             HomeScreen(
+                onNavigateToWardrobe = {
+                    navController.navigate(Screen.WardrobeList.route)
+                },
                 onLogout = {
                     navController.navigate(Screen.Login.route) {
                         popUpTo(Screen.Home.route) { inclusive = true }
                     }
+                }
+            )
+        }
+
+        // Pantalla de lista de guardarropa
+        composable(Screen.WardrobeList.route) {
+            WardrobeListScreen(
+                onNavigateToUpload = {
+                    navController.navigate(Screen.UploadGarment.route)
+                }
+            )
+        }
+
+        // Pantalla de subir prenda
+        composable(Screen.UploadGarment.route) {
+            UploadGarmentScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
                 }
             )
         }

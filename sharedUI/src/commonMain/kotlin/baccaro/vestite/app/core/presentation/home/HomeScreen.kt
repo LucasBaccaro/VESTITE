@@ -22,6 +22,7 @@ import org.koin.compose.koinInject
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
+    onNavigateToWardrobe: () -> Unit,
     onLogout: () -> Unit,
     authRepository: AuthRepository = koinInject(),
     signOutUseCase: SignOutUseCase = koinInject()
@@ -96,6 +97,15 @@ fun HomeScreen(
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Button(
+                    onClick = onNavigateToWardrobe,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Ver mi Guardarropa")
+                }
             } ?: run {
                 CircularProgressIndicator()
             }

@@ -7,6 +7,18 @@
         android:icon="@mipmap/ic_launcher"
         android:label="VESTITE"
         android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <!-- FileProvider para compartir archivos (cámara) -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+        </provider>
+
         <activity
             android:name=".AppActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"

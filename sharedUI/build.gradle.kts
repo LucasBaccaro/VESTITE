@@ -158,6 +158,22 @@ buildConfig {
             "\"$value\""
         }
     )
+
+    buildConfigField(
+        "String",
+        "GEMINI_API_KEY",
+        provider {
+            val props = project.rootProject.file("local.properties")
+            val value = if (props.exists()) {
+                val properties = Properties()
+                properties.load(props.inputStream())
+                properties.getProperty("gemini.api.key")
+            } else {
+                System.getenv("GEMINI_API_KEY")
+            } ?: "placeholder-gemini-key"
+            "\"$value\""
+        }
+    )
 }
 
 room {
