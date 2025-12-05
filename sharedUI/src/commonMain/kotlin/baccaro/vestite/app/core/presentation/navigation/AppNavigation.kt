@@ -4,6 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -62,46 +65,13 @@ fun AppNavigation(
     // Observe authentication state as a Compose state
     val isAuthenticated by authRepository.isAuthenticated.collectAsState(initial = false)
 
-    // Determine initial route based on current authentication state
-    val startDestination = if (isAuthenticated) {
-        Screen.Home.route
-    } else {
-        Screen.Login.route
-    }
-    
-    /**
-     * Reactive navigation based on authentication state changes.
-     *
-     * This effect runs whenever [isAuthenticated] changes, ensuring the user is always
-     * on the appropriate screen for their authentication status.
-     *
-     * Use Cases:
-     * - User completes OAuth login → Navigates to Home
-     * - User logs out → Navigates to Login
-     * - Session expires → Navigates to Login
-     *
-     * The navigation clears the entire back stack to prevent users from navigating
-     * back to screens they shouldn't access (e.g., Login when authenticated, or
-     * Home when not authenticated).
-     */
-    LaunchedEffect(isAuthenticated) {
-
+    // Determine initial route based on INITIAL authentication state
+    // CRITICAL: Must be stable (not change after first composition) to prevent NavHost recreation
+    val startDestination = remember {
         if (isAuthenticated) {
-            // User is authenticated, ensure they're on the Home screen
-            if (navController.currentDestination?.route != Screen.Home.route) {
-                navController.navigate(Screen.Home.route) {
-                    // Clear entire back stack to prevent back navigation to Login
-                    popUpTo(0) { inclusive = true }
-                }
-            }
+            Screen.Home.route
         } else {
-            // User is not authenticated, ensure they're on the Login screen
-            if (navController.currentDestination?.route != Screen.Login.route) {
-                navController.navigate(Screen.Login.route) {
-                    // Clear entire back stack
-                    popUpTo(0) { inclusive = true }
-                }
-            }
+            Screen.Login.route
         }
     }
 

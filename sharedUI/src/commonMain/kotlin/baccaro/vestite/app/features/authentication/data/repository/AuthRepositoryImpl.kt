@@ -12,6 +12,7 @@ import io.github.jan.supabase.auth.providers.builtin.IDToken
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.exceptions.RestException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -30,11 +31,13 @@ class AuthRepositoryImpl(
         }
     }
 
-    override val isAuthenticated: Flow<Boolean> = supabase.auth.sessionStatus.map { status ->
-        val authenticated = status is SessionStatus.Authenticated
-        println("AuthRepository - Session status changed: $status, isAuthenticated: $authenticated")
-        authenticated
-    }
+    override val isAuthenticated: Flow<Boolean> = supabase.auth.sessionStatus
+        .map { status ->
+            val authenticated = status is SessionStatus.Authenticated
+            println("AuthRepository - Session status changed: $status, isAuthenticated: $authenticated")
+            authenticated
+        }
+        .distinctUntilChanged()
 
     override suspend fun signUp(
         email: String,
