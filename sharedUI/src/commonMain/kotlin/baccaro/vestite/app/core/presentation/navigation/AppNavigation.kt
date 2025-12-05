@@ -1,5 +1,6 @@
 package baccaro.vestite.app.core.presentation.navigation
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -11,12 +12,11 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import baccaro.vestite.app.core.presentation.main.MainScreen
 import baccaro.vestite.app.features.authentication.domain.repository.AuthRepository
 import baccaro.vestite.app.features.authentication.presentation.login.LoginScreen
 import baccaro.vestite.app.features.authentication.presentation.register.RegisterScreen
-import baccaro.vestite.app.features.wardrobe.presentation.list.WardrobeListScreen
 import baccaro.vestite.app.features.wardrobe.presentation.upload.UploadGarmentScreen
-import baccaro.vestite.app.core.presentation.home.HomeScreen
 import org.koin.compose.koinInject
 
 private const val TAG = "AppNavigation"
@@ -26,13 +26,32 @@ private const val TAG = "AppNavigation"
  *
  * Defines all navigation destinations in the app using a sealed class hierarchy.
  * Each route has a unique string identifier used by Jetpack Navigation.
+ *
+ * Architecture:
+ * - Auth screens: Login, Register
+ * - Main screen: Container with BottomBar (Home, Wardrobe, Looks, AI Generation)
+ * - Secondary screens: Screens without BottomBar (Profile, Upload, Chat, Detail, etc.)
  */
 sealed class Screen(val route: String) {
+    // Auth screens
     data object Login : Screen("login")
     data object Register : Screen("register")
-    data object Home : Screen("home")
-    data object WardrobeList : Screen("wardrobe_list")
+
+    // Main screen with BottomBar
+    data object Main : Screen("main")
+
+    // BottomBar destinations (inside Main)
+    sealed class BottomBar(route: String) : Screen(route) {
+        data object Home : BottomBar("home")
+        data object Wardrobe : BottomBar("wardrobe")
+        data object Looks : BottomBar("looks")
+        data object AIGeneration : BottomBar("ai_generation")
+    }
+
+    // Secondary screens (without BottomBar)
+    data object Profile : Screen("profile")
     data object UploadGarment : Screen("upload_garment")
+    data object ChatAssistant : Screen("chat_assistant")
 }
 
 /**
@@ -69,7 +88,7 @@ fun AppNavigation(
     // CRITICAL: Must be stable (not change after first composition) to prevent NavHost recreation
     val startDestination = remember {
         if (isAuthenticated) {
-            Screen.Home.route
+            Screen.Main.route
         } else {
             Screen.Login.route
         }
@@ -79,60 +98,87 @@ fun AppNavigation(
         navController = navController,
         startDestination = startDestination
     ) {
-        // Pantalla de Login
+        // ========== AUTH SCREENS ==========
+
+        // Login screen
         composable(Screen.Login.route) {
             LoginScreen(
                 onNavigateToRegister = {
                     navController.navigate(Screen.Register.route)
                 },
                 onLoginSuccess = {
-                    navController.navigate(Screen.Home.route) {
+                    navController.navigate(Screen.Main.route) {
                         popUpTo(Screen.Login.route) { inclusive = true }
                     }
                 }
             )
         }
 
-        // Pantalla de Registro
+        // Register screen
         composable(Screen.Register.route) {
             RegisterScreen(
                 onNavigateBack = {
                     navController.popBackStack()
                 },
                 onRegisterSuccess = {
-                    navController.navigate(Screen.Home.route) {
+                    navController.navigate(Screen.Main.route) {
                         popUpTo(Screen.Login.route) { inclusive = true }
                     }
                 }
             )
         }
 
-        // Pantalla Home
-        composable(Screen.Home.route) {
-            HomeScreen(
-                onNavigateToWardrobe = {
-                    navController.navigate(Screen.WardrobeList.route)
+        // ========== MAIN SCREEN (with BottomBar) ==========
+
+        // Main screen container with BottomBar
+        // Contains: Home, Wardrobe, Looks, AI Generation
+        composable(Screen.Main.route) {
+            MainScreen(
+                onNavigateToProfile = {
+                    navController.navigate(Screen.Profile.route)
+                },
+                onNavigateToUpload = {
+                    navController.navigate(Screen.UploadGarment.route)
+                },
+                onNavigateToChatAssistant = {
+                    navController.navigate(Screen.ChatAssistant.route)
                 },
                 onLogout = {
                     navController.navigate(Screen.Login.route) {
-                        popUpTo(Screen.Home.route) { inclusive = true }
+                        popUpTo(Screen.Main.route) { inclusive = true }
                     }
                 }
             )
         }
 
-        // Pantalla de lista de guardarropa
-        composable(Screen.WardrobeList.route) {
-            WardrobeListScreen(
-                onNavigateToUpload = {
-                    navController.navigate(Screen.UploadGarment.route)
+        // ========== SECONDARY SCREENS (without BottomBar) ==========
+
+        // Profile screen
+        composable(Screen.Profile.route) {
+            baccaro.vestite.app.features.profile.presentation.ProfileScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onLogout = {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(Screen.Main.route) { inclusive = true }
+                    }
                 }
             )
         }
 
-        // Pantalla de subir prenda
+        // Upload garment screen
         composable(Screen.UploadGarment.route) {
             UploadGarmentScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        // Chat assistant screen
+        composable(Screen.ChatAssistant.route) {
+            baccaro.vestite.app.features.chat.presentation.ChatAssistantScreen(
                 onNavigateBack = {
                     navController.popBackStack()
                 }
