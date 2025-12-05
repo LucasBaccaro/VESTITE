@@ -34,6 +34,7 @@ val wardrobeModule = module {
                     ignoreUnknownKeys = true
                     isLenient = true
                     prettyPrint = true
+                    encodeDefaults = true  // CRITICAL: Include default values in serialization
                 })
             }
 

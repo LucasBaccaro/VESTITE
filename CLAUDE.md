@@ -277,45 +277,163 @@ outfits (
 - `avatars` (public) - Fotos de perfil
 - `outfits` (private) - Outfits generados
 
+**Storage Policies (CRÍTICO - Configurar en Supabase Dashboard):**
+```sql
+-- Permitir a usuarios autenticados subir sus propias imágenes
+CREATE POLICY "Users can upload their own garments"
+ON storage.objects FOR INSERT
+TO authenticated
+WITH CHECK (
+  bucket_id = 'garments'
+  AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- Permitir a usuarios actualizar sus propias imágenes
+CREATE POLICY "Users can update their own garments"
+ON storage.objects FOR UPDATE
+TO authenticated
+USING (
+  bucket_id = 'garments'
+  AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- Permitir a usuarios eliminar sus propias imágenes
+CREATE POLICY "Users can delete their own garments"
+ON storage.objects FOR DELETE
+TO authenticated
+USING (
+  bucket_id = 'garments'
+  AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- Permitir lectura pública de imágenes
+CREATE POLICY "Anyone can view garments"
+ON storage.objects FOR SELECT
+TO public
+USING (bucket_id = 'garments');
+```
+
+**Nota:** Sin estas políticas, obtendrás error "new row violates row-level security policy" al intentar subir imágenes.
+
 ### Gemini AI Integration
 
-**Modelo usado:** `gemini-2.0-flash-exp`
+**Modelo usado:** `gemini-2.5-flash`
 - Rápido (~1-2 segundos)
-- Económico
+- Económico y estable
 - Análisis de imagen → JSON estructurado
+- Modelo actualizado y más confiable que la versión experimental
+
+**Configuración Crítica:**
+```kotlin
+// WardrobeModule.kt - HttpClient para Gemini
+single<HttpClient>(qualifier = named("gemini")) {
+    HttpClient {
+        install(ContentNegotiation) {
+            json(Json {
+                ignoreUnknownKeys = true
+                isLenient = true
+                prettyPrint = true
+                encodeDefaults = true  // CRÍTICO: Serializa valores por defecto (mime_type)
+            })
+        }
+    }
+}
+```
 
 **Prompt:**
 ```
-Analiza esta prenda. Retorna un JSON con:
+Analiza esta prenda de vestir. Retorna un JSON con exactamente estos campos:
 - description: descripción visual detallada (color, material, tipo, estilo)
-- fit: tipo de ajuste (tight/regular/loose/oversized)
+- fit: tipo de ajuste (debe ser exactamente uno de estos: "tight", "regular", "loose", "oversized")
 
-Responde SOLO el JSON.
+Responde SOLO con el JSON, sin markdown ni texto adicional.
+
+Ejemplo:
+{"description": "Campera de cuero negra tipo biker con cierre metálico", "fit": "regular"}
 ```
 
-**Implementación:**
+**Implementación Correcta (basada en código React Native funcional):**
 ```kotlin
 // GeminiRepository.kt
 suspend fun analyzeGarmentImage(imageBytes: ByteArray): Result<GarmentMetadata> {
+    val prompt = buildAnalysisPrompt()
+    val base64Image = imageBytes.encodeBase64()
+
+    // Validar tamaño de imagen (límite Gemini: 5 MB)
+    val imageSizeMB = imageBytes.size / (1024.0 * 1024.0)
+    if (imageSizeMB > 5.0) {
+        throw Exception("Imagen muy grande (${imageSizeMB} MB). Gemini acepta hasta 5 MB.")
+    }
+
+    // Request con formato EXACTO del código React Native que funciona
     val request = GeminiRequest(
         contents = listOf(
-            Content(parts = listOf(
-                Part(text = prompt),
-                Part(inlineData = InlineData(data = imageBytes.encodeBase64()))
-            ))
+            Content(
+                parts = listOf(
+                    // CRÍTICO: Imagen PRIMERO, texto DESPUÉS
+                    Part(inlineData = InlineData(
+                        mimeType = "image/jpeg",
+                        data = base64Image
+                    )),
+                    Part(text = prompt)
+                )
+            )
+        ),
+        generationConfig = GenerationConfig(
+            temperature = 0.1,                    // Respuestas consistentes
+            maxOutputTokens = 4096,               // Suficiente para JSON
+            responseModalities = listOf("TEXT")   // Deshabilita thinking mode
         )
     )
 
     val response = httpClient.post(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
+        "$GEMINI_API_BASE_URL/gemini-2.5-flash:generateContent"
     ) {
         header("x-goog-api-key", BuildConfig.GEMINI_API_KEY)
+        contentType(ContentType.Application.Json)
         setBody(request)
     }
 
-    // Parse JSON response → GarmentMetadata
+    // Validar HTTP status
+    if (response.status.value !in 200..299) {
+        throw Exception("API request failed: HTTP ${response.status.value}")
+    }
+
+    // Parse y validación robusta de respuesta
+    val geminiResponse = response.body<GeminiResponse>()
+
+    // Validar candidatos y finish reason
+    val candidates = geminiResponse.candidates
+    if (candidates.isNullOrEmpty()) {
+        throw Exception("Gemini no retornó candidatos")
+    }
+
+    val candidate = candidates.first()
+    when (candidate.finishReason) {
+        "SAFETY" -> throw Exception("Contenido bloqueado por seguridad")
+        "RECITATION" -> throw Exception("Contenido bloqueado por copyright")
+        "MAX_TOKENS" -> throw Exception("Respuesta truncada")
+    }
+
+    val textResponse = candidate.content?.parts?.firstOrNull()?.text
+    if (textResponse.isNullOrBlank()) {
+        throw Exception("Sin respuesta de texto")
+    }
+
+    // Extraer y parsear JSON
+    val jsonText = extractJson(textResponse)
+    val analysisResponse = json.decodeFromString<GarmentAnalysisResponse>(jsonText)
+
+    return Result.success(analysisResponse.toDomain())
 }
 ```
+
+**Puntos Clave:**
+- ✅ Orden correcto: imagen PRIMERO, texto DESPUÉS
+- ✅ `encodeDefaults = true` para serializar `mime_type`
+- ✅ `responseModalities: ["TEXT"]` deshabilita thinking mode
+- ✅ Validación de tamaño de imagen antes de enviar
+- ✅ Error handling robusto para todos los casos edge
 
 ### Image Picker (Expect/Actual)
 
@@ -334,29 +452,89 @@ expect fun rememberImagePicker(
 ): ImagePickerLauncher
 ```
 
-**Android (actual):**
+**Android (actual) - CON COMPRESIÓN AUTOMÁTICA:**
 - `PickVisualMedia` - Photo Picker (sin permisos desde API 33+)
 - `TakePicture` - Cámara nativa (guarda en caché, sin permisos)
 - `FileProvider` configurado para compartir URIs
+- **Compresión automática de imágenes:**
+  - Redimensiona a máximo 2048x2048 (mantiene buena calidad)
+  - Comprime JPEG con calidad adaptiva (90-50)
+  - Asegura que la imagen final sea menor a 5 MB (límite Gemini)
+  - Libera memoria automáticamente (Bitmap.recycle())
 
-**iOS (actual - stub):**
-- Firma implementada, retorna stub
-- TODO: Implementar con UIImagePickerController
+**Implementación de Compresión (Android):**
+```kotlin
+private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
+    val inputStream = context.contentResolver.openInputStream(uri)
+    val originalBitmap = BitmapFactory.decodeStream(inputStream)
+
+    // Redimensionar si es necesario (max 2048x2048)
+    val maxDimension = 2048
+    val scale = minOf(
+        maxDimension.toFloat() / originalBitmap.width,
+        maxDimension.toFloat() / originalBitmap.height,
+        1.0f
+    )
+
+    val resizedBitmap = if (scale < 1.0f) {
+        Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+    } else {
+        originalBitmap
+    }
+
+    // Comprimir con calidad adaptiva hasta estar bajo 5 MB
+    var quality = 90
+    do {
+        val outputStream = ByteArrayOutputStream()
+        resizedBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+        compressedBytes = outputStream.toByteArray()
+
+        if (sizeMB <= 5.0) break
+        quality -= 10
+    } while (quality >= 50)
+
+    return compressedBytes
+}
+```
+
+**iOS (actual) - IMPLEMENTADO:**
+- UIImagePickerController para galería y cámara
+- Compresión similar a Android para mantener consistencia
+- Sin permisos requeridos (usa Photo Library)
 
 **Ventajas:**
 - ✅ NO requiere permisos en Android (Photo Picker + caché privado)
 - ✅ APIs modernas (ActivityResultContracts)
 - ✅ Mejor privacidad (usuario controla qué compartir)
+- ✅ Compresión automática transparente al usuario
+- ✅ Optimizado para límites de Gemini API (5 MB)
+- ✅ Gestión eficiente de memoria
 
 ### Koin DI Module
 
 ```kotlin
 val wardrobeModule = module {
-    // HttpClient para Gemini
-    single(named("gemini")) { HttpClient { ... } }
+    // HttpClient dedicado para Gemini API
+    single<HttpClient>(qualifier = named("gemini")) {
+        HttpClient {
+            install(ContentNegotiation) {
+                json(Json {
+                    ignoreUnknownKeys = true
+                    isLenient = true
+                    prettyPrint = true
+                    encodeDefaults = true  // CRÍTICO: Serializa valores por defecto
+                })
+            }
+
+            install(Logging) {
+                logger = Logger.SIMPLE
+                level = LogLevel.INFO
+            }
+        }
+    }
 
     // Repositories
-    single { GeminiRepository(get(named("gemini"))) }
+    single { GeminiRepository(get(qualifier = named("gemini"))) }
     single<GarmentRepository> { GarmentRepositoryImpl(get(), get()) }
 
     // Use Cases
@@ -600,8 +778,8 @@ APK location: `androidApp/build/outputs/apk/debug/`
 
 ### Platform-specific
 - `ImagePicker.kt` (commonMain) - Expect definition
-- `ImagePicker.android.kt` (androidMain) - Android implementation
-- `ImagePicker.ios.kt` (iosMain) - iOS stub
+- `ImagePicker.android.kt` (androidMain) - Android implementation con compresión automática
+- `ImagePicker.ios.kt` (iosMain) - iOS implementation con compresión automática
 
 ## Testing
 
@@ -622,13 +800,23 @@ APK location: `androidApp/build/outputs/apk/debug/`
 - Supabase maneja **todo el estado** de sesión automáticamente
 
 ### Wardrobe
-- **Image Picker** usa expect/actual pattern (iOS stub listo para implementar)
-- **Sin permisos** en Android (Photo Picker + TakePicture con caché)
-- **Gemini Flash** analiza automáticamente cada prenda subida
+- **Image Picker** usa expect/actual pattern con compresión automática
+  - Android: PickVisualMedia + TakePicture (sin permisos)
+  - iOS: IMPLEMENTADO con UIImagePickerController
+  - Compresión automática a <5 MB (redimensiona a 2048x2048, JPEG calidad adaptiva 90-50)
+- **Gemini AI** con modelo `gemini-2.5-flash` (estable)
+  - Analiza automáticamente cada prenda subida
+  - Configuración crítica: `encodeDefaults = true` en JSON serializer
+  - Request format: imagen PRIMERO, texto DESPUÉS
+  - `responseModalities: ["TEXT"]` deshabilita thinking mode
+  - Validación de tamaño antes de enviar (<5 MB)
 - **Supabase Storage** guarda imágenes con URLs públicas
-- **RLS activado** - cada usuario solo ve sus datos
+  - Bucket `garments` con políticas RLS configuradas
+  - CRÍTICO: Configurar políticas de INSERT/UPDATE/DELETE en Storage
+  - Sin políticas: error "new row violates row-level security policy"
+- **RLS activado** - cada usuario solo ve/edita sus datos
 - **Trigger automático** crea perfil al registrarse usuario
-- **FileProvider** configurado para compartir imágenes de cámara
+- **FileProvider** configurado para compartir imágenes de cámara (Android)
 
 ### Próximos Features
 - Virtual Try-On con Gemini 3 Pro (ver `MINI.ROADMAP.md`)

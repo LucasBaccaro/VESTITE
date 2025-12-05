@@ -52,7 +52,10 @@ data class GenerationConfig(
     val maxOutputTokens: Int? = null,
 
     @SerialName("responseMimeType")
-    val responseMimeType: String? = null
+    val responseMimeType: String? = null,
+
+    @SerialName("responseModalities")
+    val responseModalities: List<String>? = null
 )
 
 // Response DTOs

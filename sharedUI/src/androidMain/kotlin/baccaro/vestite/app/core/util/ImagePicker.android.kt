@@ -94,21 +94,67 @@ actual fun rememberImagePicker(
 }
 
 /**
- * Convierte un URI a ByteArray
+ * Convierte un URI a ByteArray con compresión automática
+ * Comprime la imagen para mantenerla bajo 5 MB (límite de Gemini)
  */
 private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
     val inputStream = context.contentResolver.openInputStream(uri)
         ?: throw Exception("Cannot open input stream")
 
-    return inputStream.use { stream ->
-        val buffer = ByteArrayOutputStream()
-        val data = ByteArray(1024)
-        var nRead: Int
-        while (stream.read(data, 0, data.size).also { nRead = it } != -1) {
-            buffer.write(data, 0, nRead)
+    // Cargar imagen como Bitmap
+    val originalBitmap = BitmapFactory.decodeStream(inputStream)
+        ?: throw Exception("Cannot decode image")
+
+    inputStream.close()
+
+    // Calcular tamaño redimensionado (max 2048x2048 para mantener calidad razonable)
+    val maxDimension = 2048
+    val scale = minOf(
+        maxDimension.toFloat() / originalBitmap.width,
+        maxDimension.toFloat() / originalBitmap.height,
+        1.0f // No aumentar si ya es pequeña
+    )
+
+    val resizedBitmap = if (scale < 1.0f) {
+        val newWidth = (originalBitmap.width * scale).toInt()
+        val newHeight = (originalBitmap.height * scale).toInt()
+        println("Resizing image from ${originalBitmap.width}x${originalBitmap.height} to ${newWidth}x${newHeight}")
+        Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true).also {
+            originalBitmap.recycle() // Liberar memoria
         }
-        buffer.toByteArray()
+    } else {
+        originalBitmap
     }
+
+    // Comprimir con diferentes calidades hasta que esté bajo 5 MB
+    var quality = 90
+    var compressedBytes: ByteArray
+
+    do {
+        val outputStream = ByteArrayOutputStream()
+        resizedBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+        compressedBytes = outputStream.toByteArray()
+
+        val sizeMB = compressedBytes.size / (1024.0 * 1024.0)
+        println("Compressed at quality $quality: ${String.format("%.2f", sizeMB)} MB")
+
+        if (sizeMB <= 5.0) {
+            break
+        }
+
+        quality -= 10
+    } while (quality >= 50) // No bajar de calidad 50
+
+    resizedBitmap.recycle() // Liberar memoria
+
+    val finalSizeMB = compressedBytes.size / (1024.0 * 1024.0)
+    println("Final image size: ${String.format("%.2f", finalSizeMB)} MB")
+
+    if (finalSizeMB > 5.0) {
+        throw Exception("No se pudo comprimir la imagen a menos de 5 MB. Intenta con una foto más pequeña.")
+    }
+
+    return compressedBytes
 }
 
 /**
