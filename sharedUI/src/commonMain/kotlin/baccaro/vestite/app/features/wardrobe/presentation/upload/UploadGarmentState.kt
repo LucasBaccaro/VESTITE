@@ -1,7 +1,6 @@
 package baccaro.vestite.app.features.wardrobe.presentation.upload
 
 import baccaro.vestite.app.features.wardrobe.domain.model.Category
-import baccaro.vestite.app.features.wardrobe.domain.model.GarmentFit
 
 data class UploadGarmentState(
     val categories: List<Category> = emptyList(),
@@ -15,8 +14,7 @@ data class UploadGarmentState(
     val showPreview: Boolean = false,
     val analyzedImageBytes: ByteArray? = null,
     val analyzedFileName: String? = null,
-    val aiDescription: String? = null,
-    val aiFit: GarmentFit? = null
+    val aiDescription: String? = null
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -38,7 +36,6 @@ data class UploadGarmentState(
         } else if (other.analyzedImageBytes != null) return false
         if (analyzedFileName != other.analyzedFileName) return false
         if (aiDescription != other.aiDescription) return false
-        if (aiFit != other.aiFit) return false
 
         return true
     }
@@ -55,7 +52,6 @@ data class UploadGarmentState(
         result = 31 * result + (analyzedImageBytes?.contentHashCode() ?: 0)
         result = 31 * result + (analyzedFileName?.hashCode() ?: 0)
         result = 31 * result + (aiDescription?.hashCode() ?: 0)
-        result = 31 * result + (aiFit?.hashCode() ?: 0)
         return result
     }
 }

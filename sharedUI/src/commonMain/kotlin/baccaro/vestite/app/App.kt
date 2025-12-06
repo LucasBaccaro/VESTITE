@@ -10,6 +10,7 @@ import baccaro.vestite.app.core.di.coreModule
 import baccaro.vestite.app.core.presentation.navigation.AppNavigation
 import baccaro.vestite.app.features.authentication.di.authenticationModule
 import baccaro.vestite.app.features.wardrobe.di.wardrobeModule
+import baccaro.vestite.app.features.weather.di.weatherModule
 import baccaro.vestite.app.theme.AppTheme
 import com.mmk.kmpauth.google.GoogleAuthCredentials
 import com.mmk.kmpauth.google.GoogleAuthProvider
@@ -45,7 +46,8 @@ fun App(
             modules(
                 coreModule,
                 authenticationModule,
-                wardrobeModule
+                wardrobeModule,
+                weatherModule
             )
         }
     ) {

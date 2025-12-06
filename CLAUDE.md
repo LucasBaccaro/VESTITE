@@ -42,6 +42,7 @@ sharedUI/src/commonMain/kotlin/baccaro/vestite/app/
 - `looks/` - Outfits guardados (stub)
 - `aiGeneration/` - Generación AI de outfits (stub)
 - `chat/` - Asistente IA de estilo (stub)
+- `weather/` - Clima basado en ubicación (Open-Meteo API)
 
 **Future Features:**
 - `tryon/` - Virtual Try-On con Gemini 3 Pro
@@ -61,8 +62,10 @@ sharedUI/src/commonMain/kotlin/baccaro/vestite/app/
 - **Ktor** 3.3.3 - HTTP client
 
 ### AI & Image Processing
-- **Gemini AI** - Análisis automático de prendas (Gemini 2.0 Flash)
+- **Gemini AI** - Análisis automático de prendas (Gemini 2.5 Flash)
+- **Gemini AI Image** - Edición y remoción de fondo (Gemini 2.5 Flash Image)
 - **Coil** 3.3.0 - Image loading con AsyncImage
+- **ExifInterface** 1.3.7 - Manejo de orientación de imágenes (Android)
 - **FileProvider** - Compartir imágenes para cámara (Android)
 
 ### Other
@@ -161,7 +164,10 @@ suspend fun signInWithGoogleIdToken(idToken: String): Result<User> {
 
 ### Overview
 
-Feature completa para gestión de guardarropa personal con análisis automático de prendas usando Gemini AI. Permite al usuario subir fotos de prendas (desde galería o cámara), que son automáticamente analizadas por IA para extraer metadatos (descripción, tipo de ajuste), y almacenadas en Supabase.
+Feature completa para gestión de guardarropa personal con análisis automático de prendas usando Gemini AI. Permite al usuario subir fotos de prendas (desde galería o cámara), que son automáticamente:
+1. **Analizadas** por Gemini 2.5 Flash para extraer descripción concisa
+2. **Editadas** por Gemini 2.5 Flash Image para remover fondo y mejorar calidad
+3. **Almacenadas** en Supabase Storage con imagen profesional lista para marketplace
 
 ### Arquitectura
 
@@ -209,25 +215,42 @@ features/wardrobe/
 ### Flujo Completo de Upload
 
 ```
-Usuario selecciona categoría (Superior/Inferior/Calzado)
-    ↓
 Usuario toca "Galería" o "Cámara"
     ↓
 ImagePicker (expect/actual):
   - Android: PickVisualMedia / TakePicture (sin permisos)
-  - iOS: TODO (stub preparado)
+  - iOS: UIImagePickerController
+  - EXIF orientation handling automático
+  - Compresión automática (<5 MB)
     ↓
 Imagen seleccionada → ByteArray
     ↓
-UploadGarmentUseCase:
-  1. Gemini Flash analiza imagen
-     → { description: "...", fit: "regular" }
-  2. Upload a Supabase Storage (bucket: garments)
+UploadGarmentViewModel.analyzeGarment():
+
+  Paso 1: Análisis con Gemini 2.5 Flash (~3-5 seg)
+    - Prompt conciso enfocado en prenda principal
+    - Retorna: { description: "Zapatillas deportivas blancas..." }
+
+  Paso 2: Edición con Gemini 2.5 Flash Image (~20-30 seg)
+    - Remueve fondo completamente
+    - Reemplaza con blanco puro (#FFFFFF)
+    - Preserva todos los detalles de la prenda
+    - Bordes limpios sin halos ni artefactos
+    - Retorna: imagen editada en base64
+    ↓
+Preview Screen:
+  - Muestra imagen editada con fondo blanco
+  - Muestra descripción IA
+  - Usuario selecciona categoría (Superior/Inferior/Calzado)
+    ↓
+Usuario presiona "Guardar Prenda"
+    ↓
+  1. Upload imagen editada a Supabase Storage (bucket: garments)
      → URL pública
-  3. Insert en DB (tabla: garments)
+  2. Insert en DB (tabla: garments)
      → Prenda guardada con metadatos
     ↓
-Success: Vuelve a lista de prendas
+Success: Vuelve a lista de prendas con imagen profesional
 ```
 
 ### Database Schema
@@ -254,9 +277,8 @@ garments (
     id UUID PK,
     user_id UUID → auth.users(id),
     category_id UUID → categories(id),
-    image_url TEXT,           -- URL en Storage
-    ai_description TEXT,      -- Generado por Gemini
-    ai_fit TEXT,              -- tight/regular/loose/oversized
+    image_url TEXT,           -- URL en Storage (imagen con fondo blanco)
+    ai_description TEXT,      -- Descripción concisa generada por Gemini
     created_at, updated_at
 )
 
@@ -321,11 +343,19 @@ USING (bucket_id = 'garments');
 
 ### Gemini AI Integration
 
-**Modelo usado:** `gemini-2.5-flash`
-- Rápido (~1-2 segundos)
-- Económico y estable
-- Análisis de imagen → JSON estructurado
-- Modelo actualizado y más confiable que la versión experimental
+**Modelos usados:**
+
+1. **`gemini-2.5-flash`** - Análisis de imagen
+   - Rápido (~3-5 segundos)
+   - Económico (~$0.01 por análisis)
+   - Análisis de imagen → JSON estructurado
+   - Descripción concisa enfocada en prenda principal
+
+2. **`gemini-2.5-flash-image`** - Edición de imagen
+   - Tiempo: ~20-30 segundos
+   - Costo: ~$0.039 por imagen editada
+   - Background removal + mejora de calidad
+   - Output: Imagen profesional con fondo blanco puro
 
 **Configuración Crítica:**
 ```kotlin
@@ -340,25 +370,76 @@ single<HttpClient>(qualifier = named("gemini")) {
                 encodeDefaults = true  // CRÍTICO: Serializa valores por defecto (mime_type)
             })
         }
+
+        install(HttpTimeout) {
+            requestTimeoutMillis = 60_000  // 60 segundos para Image Edit
+            connectTimeoutMillis = 15_000  // 15 segundos para conectar
+            socketTimeoutMillis = 60_000   // 60 segundos para socket
+        }
+
+        install(Logging) {
+            logger = Logger.SIMPLE
+            level = LogLevel.INFO
+        }
     }
 }
 ```
 
-**Prompt:**
+**IMPORTANTE:** Los timeouts largos son necesarios porque Gemini Image Edit puede tardar 20-30 segundos en procesar.
+
+**Prompts:**
+
+1. **Análisis (Gemini 2.5 Flash):**
 ```
-Analiza esta prenda de vestir. Retorna un JSON con exactamente estos campos:
-- description: descripción visual detallada (color, material, tipo, estilo)
-- fit: tipo de ajuste (debe ser exactamente uno de estos: "tight", "regular", "loose", "oversized")
+Analiza la imagen y describe ÚNICAMENTE la prenda de vestir principal de forma CONCISA.
 
-Responde SOLO con el JSON, sin markdown ni texto adicional.
+Reglas:
+- Si hay múltiples prendas, enfócate en la MÁS PROMINENTE (la que ocupa más espacio)
+- Descripción breve: tipo de prenda, color principal, material (si es visible)
+- Máximo 10-12 palabras
+- NO describas accesorios secundarios, fondo, ni personas
 
-Ejemplo:
-{"description": "Campera de cuero negra tipo biker con cierre metálico", "fit": "regular"}
+Retorna SOLO un JSON con este campo:
+- description: descripción concisa de la prenda principal
+
+Ejemplos:
+{"description": "Remera de algodón blanca con estampado central"}
+{"description": "Pantalón jean azul oscuro de corte recto"}
+{"description": "Zapatillas deportivas blancas con detalles rojos"}
 ```
 
-**Implementación Correcta (basada en código React Native funcional):**
+2. **Edición de Imagen (Gemini 2.5 Flash Image):**
+```
+Eres un editor de imágenes profesional especializado en fotografía de producto.
+
+TAREA: Edita esta imagen para aislar la prenda/objeto y colocar un fondo blanco puro.
+
+INSTRUCCIONES CRÍTICAS:
+
+1. PRESERVACIÓN DEL OBJETO:
+   - Mantén la prenda/objeto EXACTAMENTE como está
+   - NO modifiques colores, texturas, sombras del objeto
+   - Conserva todos los pliegues, arrugas y características naturales
+
+2. REMOCIÓN DEL FONDO:
+   - Elimina COMPLETAMENTE el fondo original
+   - Reemplaza con blanco puro (#FFFFFF)
+   - Corta limpiamente los bordes del objeto
+
+3. CALIDAD FINAL:
+   - Sin halos, bordes extraños o artefactos
+   - Alta definición y claridad
+   - Como si fuera una foto profesional de catálogo
+
+RESULTADO ESPERADO: Una imagen de producto profesional con fondo blanco puro, lista para e-commerce.
+```
+
+**Implementación:**
+
 ```kotlin
 // GeminiRepository.kt
+
+// Método 1: Análisis de imagen
 suspend fun analyzeGarmentImage(imageBytes: ByteArray): Result<GarmentMetadata> {
     val prompt = buildAnalysisPrompt()
     val base64Image = imageBytes.encodeBase64()
@@ -430,13 +511,58 @@ suspend fun analyzeGarmentImage(imageBytes: ByteArray): Result<GarmentMetadata> 
 
     return Result.success(analysisResponse.toDomain())
 }
+
+// Método 2: Edición de imagen (background removal)
+suspend fun removeBackground(imageBytes: ByteArray): Result<ByteArray> {
+    val prompt = buildBackgroundRemovalPrompt()
+    val base64Image = imageBytes.encodeBase64()
+
+    val request = GeminiRequest(
+        contents = listOf(
+            Content(
+                parts = listOf(
+                    Part(text = prompt),  // PROMPT PRIMERO
+                    Part(inlineData = InlineData(
+                        mimeType = "image/jpeg",
+                        data = base64Image
+                    ))
+                )
+            )
+        )
+    )
+
+    val response = httpClient.post(
+        "$GEMINI_API_BASE_URL/gemini-2.5-flash-image:generateContent"
+    ) {
+        header("x-goog-api-key", BuildConfig.GEMINI_API_KEY)
+        contentType(ContentType.Application.Json)
+        setBody(request)
+    }
+
+    val geminiResponse = response.body<GeminiResponse>()
+
+    // Extraer imagen del response
+    val imagePart = geminiResponse.candidates?.first()
+        ?.content?.parts?.firstOrNull { it.inlineData != null }
+    val resultBase64 = imagePart?.inlineData?.data
+        ?: throw Exception("No se pudo extraer la imagen procesada")
+
+    // Decodificar base64 a ByteArray
+    val resultBytes = kotlin.io.encoding.Base64.decode(resultBase64)
+
+    return Result.success(resultBytes)
+}
 ```
 
 **Puntos Clave:**
-- ✅ Orden correcto: imagen PRIMERO, texto DESPUÉS
+- ✅ **Análisis:** Orden imagen PRIMERO, texto DESPUÉS (para gemini-2.5-flash)
+- ✅ **Edición:** Orden INVERTIDO - texto PRIMERO, imagen DESPUÉS (para gemini-2.5-flash-image)
 - ✅ `encodeDefaults = true` para serializar `mime_type`
-- ✅ `responseModalities: ["TEXT"]` deshabilita thinking mode
-- ✅ Validación de tamaño de imagen antes de enviar
+- ✅ `responseModalities: ["TEXT"]` deshabilita thinking mode en análisis
+- ✅ Validación de tamaño de imagen antes de enviar (<5 MB)
+- ✅ Timeout de 60 segundos para Image Edit (puede tardar 20-30 seg)
+- ✅ Response de Image Edit contiene `inlineData` con imagen en base64
+- ✅ Usar `kotlin.io.encoding.Base64.decode()` para decodificar imagen resultante
 - ✅ Error handling robusto para todos los casos edge
 
 ### Image Picker (Expect/Actual)
@@ -456,34 +582,70 @@ expect fun rememberImagePicker(
 ): ImagePickerLauncher
 ```
 
-**Android (actual) - CON COMPRESIÓN AUTOMÁTICA:**
+**Android (actual) - CON COMPRESIÓN Y CORRECCIÓN DE ORIENTACIÓN:**
 - `PickVisualMedia` - Photo Picker (sin permisos desde API 33+)
 - `TakePicture` - Cámara nativa (guarda en caché, sin permisos)
 - `FileProvider` configurado para compartir URIs
+- **Corrección automática de orientación EXIF:**
+  - Lee metadatos EXIF de la imagen usando `androidx.exifinterface`
+  - Aplica rotación correcta (90°, 180°, 270°) según orientación
+  - Maneja flip horizontal/vertical si es necesario
+  - Garantiza que la imagen se muestre en orientación correcta
 - **Compresión automática de imágenes:**
   - Redimensiona a máximo 2048x2048 (mantiene buena calidad)
   - Comprime JPEG con calidad adaptiva (90-50)
   - Asegura que la imagen final sea menor a 5 MB (límite Gemini)
   - Libera memoria automáticamente (Bitmap.recycle())
 
-**Implementación de Compresión (Android):**
+**Implementación de Compresión y EXIF (Android):**
 ```kotlin
 private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
     val inputStream = context.contentResolver.openInputStream(uri)
     val originalBitmap = BitmapFactory.decodeStream(inputStream)
+    inputStream?.close()
+
+    // Leer orientación EXIF y aplicar rotación si es necesario
+    val rotatedBitmap = try {
+        context.contentResolver.openInputStream(uri)?.use { exifStream ->
+            val exif = ExifInterface(exifStream)
+            val orientation = exif.getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+
+            when (orientation) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> rotateBitmap(originalBitmap, 90f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> rotateBitmap(originalBitmap, 180f)
+                ExifInterface.ORIENTATION_ROTATE_270 -> rotateBitmap(originalBitmap, 270f)
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> flipBitmap(originalBitmap, horizontal = true)
+                else -> originalBitmap
+            }
+        } ?: originalBitmap
+    } catch (e: Exception) {
+        originalBitmap
+    }
+
+    // Si se aplicó rotación, liberar el bitmap original
+    if (rotatedBitmap !== originalBitmap) {
+        originalBitmap.recycle()
+    }
 
     // Redimensionar si es necesario (max 2048x2048)
     val maxDimension = 2048
     val scale = minOf(
-        maxDimension.toFloat() / originalBitmap.width,
-        maxDimension.toFloat() / originalBitmap.height,
+        maxDimension.toFloat() / rotatedBitmap.width,
+        maxDimension.toFloat() / rotatedBitmap.height,
         1.0f
     )
 
     val resizedBitmap = if (scale < 1.0f) {
-        Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+        val newWidth = (rotatedBitmap.width * scale).toInt()
+        val newHeight = (rotatedBitmap.height * scale).toInt()
+        Bitmap.createScaledBitmap(rotatedBitmap, newWidth, newHeight, true).also {
+            rotatedBitmap.recycle()
+        }
     } else {
-        originalBitmap
+        rotatedBitmap
     }
 
     // Comprimir con calidad adaptiva hasta estar bajo 5 MB
@@ -499,6 +661,25 @@ private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
 
     return compressedBytes
 }
+
+// Funciones helper para rotación
+private fun rotateBitmap(bitmap: Bitmap, degrees: Float): Bitmap {
+    val matrix = Matrix().apply { postRotate(degrees) }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+}
+
+private fun flipBitmap(bitmap: Bitmap, horizontal: Boolean): Bitmap {
+    val matrix = Matrix().apply {
+        postScale(if (horizontal) -1f else 1f, 1f, bitmap.width / 2f, bitmap.height / 2f)
+    }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+}
+```
+
+**Dependencia requerida:**
+```kotlin
+// sharedUI/build.gradle.kts - androidMain.dependencies
+implementation("androidx.exifinterface:exifinterface:1.3.7")
 ```
 
 **iOS (actual) - IMPLEMENTADO:**
@@ -510,6 +691,7 @@ private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
 - ✅ NO requiere permisos en Android (Photo Picker + caché privado)
 - ✅ APIs modernas (ActivityResultContracts)
 - ✅ Mejor privacidad (usuario controla qué compartir)
+- ✅ Corrección automática de orientación EXIF (fotos siempre en orientación correcta)
 - ✅ Compresión automática transparente al usuario
 - ✅ Optimizado para límites de Gemini API (5 MB)
 - ✅ Gestión eficiente de memoria
@@ -518,7 +700,7 @@ private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
 
 ```kotlin
 val wardrobeModule = module {
-    // HttpClient dedicado para Gemini API
+    // HttpClient dedicado para Gemini API (análisis + edición)
     single<HttpClient>(qualifier = named("gemini")) {
         HttpClient {
             install(ContentNegotiation) {
@@ -530,6 +712,12 @@ val wardrobeModule = module {
                 })
             }
 
+            install(HttpTimeout) {
+                requestTimeoutMillis = 60_000  // 60 segundos para Image Edit
+                connectTimeoutMillis = 15_000  // 15 segundos para conectar
+                socketTimeoutMillis = 60_000   // 60 segundos para socket
+            }
+
             install(Logging) {
                 logger = Logger.SIMPLE
                 level = LogLevel.INFO
@@ -538,7 +726,7 @@ val wardrobeModule = module {
     }
 
     // Repositories
-    single { GeminiRepository(get(qualifier = named("gemini"))) }
+    single { GeminiRepository(get(qualifier = named("gemini"))) }  // Análisis + Edición
     single<GarmentRepository> { GarmentRepositoryImpl(get(), get()) }
 
     // Use Cases
@@ -655,11 +843,14 @@ HomeScreen(
 - Texto: "Analizando prenda con IA..."
 
 **Pantalla 3 - Preview y Confirmación:**
-- Card con imagen analizada (aspect ratio 1:1)
+- **Scrolleable** para pantallas pequeñas (`.verticalScroll(rememberScrollState())`)
+- Card con imagen editada:
+  - Fondo blanco profesional
+  - Respeta aspect ratio original (horizontal/vertical)
+  - `ContentScale.Fit` con `.heightIn(max = 400.dp)`
 - Card con "Análisis IA":
-  - Descripción generada (ej: "Remera de algodón negra...")
-  - Tipo de ajuste (tight/regular/loose/oversized)
-- Selector de categoría (FilterChips)
+  - Descripción concisa y enfocada (ej: "Zapatillas deportivas blancas...")
+- Selector de categoría con `LazyRow` (scroll horizontal)
 - Botón "Guardar Prenda" (habilitado solo si hay categoría seleccionada)
 
 **Pantalla 4 - Guardando:**
@@ -706,19 +897,20 @@ Ver documentación detallada:
 3. Navegación entre tabs (Home, Wardrobe, Looks, AI Gen) - BottomBar siempre visible
 4. Presionar back desde cualquier tab → **Sale de la app**
 
-**Flujo de upload de prenda (NUEVO):**
+**Flujo de upload de prenda (ACTUALIZADO CON BACKGROUND REMOVAL):**
 1. Home → FAB (+) → **UploadGarmentScreen**
 2. **Pantalla Inicial**: "📁 Galería" o "📷 Cámara"
-3. Usuario selecciona imagen → **Analizando con IA...** (loading)
+3. Usuario selecciona imagen → **Analizando con IA...** (loading ~25-35 segundos total)
+   - Análisis con Gemini 2.5 Flash (~3-5 seg)
+   - Edición con Gemini 2.5 Flash Image (~20-30 seg)
 4. **Preview Screen** muestra:
-   - Imagen cargada
-   - Análisis IA: "Remera de algodón negra estampada..."
-   - Ajuste: "regular"
-   - Selector: [Superior] [Inferior] [Calzado]
+   - Imagen editada con fondo blanco profesional
+   - Análisis IA: "Zapatillas deportivas blancas con detalles negros y naranjas"
+   - Selector scrolleable: [Superior] [Inferior] [Calzado]
 5. Usuario selecciona categoría → **"Guardar Prenda"**
 6. **Guardando...** (loading)
 7. Success → Vuelve a Wardrobe tab
-8. Prenda aparece en grid con imagen + descripción AI
+8. Prenda aparece en grid con imagen profesional con fondo blanco + descripción AI
 
 **Flujo de perfil:**
 1. Home → Icono perfil (top-right) → **ProfileScreen**
@@ -911,25 +1103,295 @@ APK location: `androidApp/build/outputs/apk/debug/`
 - Supabase maneja **todo el estado** de sesión automáticamente
 
 ### Wardrobe
-- **Image Picker** usa expect/actual pattern con compresión automática
+- **Image Picker** usa expect/actual pattern con EXIF handling y compresión automática
   - Android: PickVisualMedia + TakePicture (sin permisos)
   - iOS: IMPLEMENTADO con UIImagePickerController
+  - **EXIF orientation handling** con `androidx.exifinterface:1.3.7`
+  - Corrección automática de rotación (90°, 180°, 270°)
   - Compresión automática a <5 MB (redimensiona a 2048x2048, JPEG calidad adaptiva 90-50)
-- **Gemini AI** con modelo `gemini-2.5-flash` (estable)
-  - Analiza automáticamente cada prenda subida
-  - Configuración crítica: `encodeDefaults = true` en JSON serializer
-  - Request format: imagen PRIMERO, texto DESPUÉS
-  - `responseModalities: ["TEXT"]` deshabilita thinking mode
+- **Gemini AI Dual Processing:**
+  1. **Análisis** con `gemini-2.5-flash` (~3-5 seg)
+     - Prompt conciso enfocado en prenda principal
+     - Descripción máximo 10-12 palabras
+     - Request format: imagen PRIMERO, texto DESPUÉS
+     - `responseModalities: ["TEXT"]` deshabilita thinking mode
+  2. **Edición** con `gemini-2.5-flash-image` (~20-30 seg)
+     - Background removal automático
+     - Fondo blanco puro (#FFFFFF)
+     - Request format: texto PRIMERO, imagen DESPUÉS
+     - Respuesta contiene imagen editada en base64
+     - **CRÍTICO:** Timeout de 60 segundos (puede tardar 20-30 seg)
+- **Configuración crítica:**
+  - `encodeDefaults = true` en JSON serializer
+  - `HttpTimeout` con 60 segundos para Image Edit
   - Validación de tamaño antes de enviar (<5 MB)
-- **Supabase Storage** guarda imágenes con URLs públicas
+  - Usar `kotlin.io.encoding.Base64.decode()` para imagen resultante
+- **Supabase Storage** guarda imágenes editadas con URLs públicas
   - Bucket `garments` con políticas RLS configuradas
   - CRÍTICO: Configurar políticas de INSERT/UPDATE/DELETE en Storage
   - Sin políticas: error "new row violates row-level security policy"
+  - Imágenes guardadas con fondo blanco profesional (listas para marketplace)
 - **RLS activado** - cada usuario solo ve/edita sus datos
 - **Trigger automático** crea perfil al registrarse usuario
 - **FileProvider** configurado para compartir imágenes de cámara (Android)
+- **Costo por prenda:** ~$0.05 USD total (análisis + edición)
 
 ### Próximos Features
 - Virtual Try-On con Gemini 3 Pro (ver `MINI.ROADMAP.md`)
 - ProfileScreen para subir foto de cuerpo entero
 - Recomendaciones AI de outfits
+
+## Weather Feature (Clima)
+
+### Overview
+
+Feature completo para mostrar el clima actual basado en la ubicación del usuario. Se muestra automáticamente en la HomeScreen mediante un `WeatherCard` que se actualiza al montar el componente.
+
+### Arquitectura
+
+```
+features/weather/
+├── data/
+│   ├── remote/
+│   │   ├── dto/          # DTOs de Open-Meteo API
+│   │   │   └── WeatherDto.kt
+│   │   └── repository/
+│   │       └── WeatherRepositoryImpl.kt
+│   ├── location/         # Servicios de ubicación (expect/actual)
+│   │   ├── LocationService.kt
+│   │   ├── LocationService.android.kt
+│   │   └── LocationService.ios.kt
+│   └── mapper/
+│       └── WeatherMapper.kt   # Mappers DTO → Domain + WMO codes
+├── domain/
+│   ├── model/
+│   │   ├── Location.kt        # Coordenadas geográficas
+│   │   └── Weather.kt         # Datos del clima
+│   ├── repository/
+│   │   └── WeatherRepository.kt
+│   └── usecase/
+│       ├── GetLocationUseCase.kt
+│       └── GetCurrentWeatherUseCase.kt
+├── presentation/
+│   ├── WeatherCard.kt        # Card para HomeScreen
+│   ├── WeatherViewModel.kt
+│   └── WeatherState.kt
+└── di/
+    ├── WeatherModule.kt
+    ├── LocationServiceModule.kt (expect/actual)
+    ├── LocationServiceModule.android.kt
+    └── LocationServiceModule.ios.kt
+```
+
+### Flujo Completo
+
+```
+HomeScreen monta → WeatherCard se renderiza
+    ↓
+LaunchedEffect(Unit) → viewModel.loadWeather()
+    ↓
+GetLocationUseCase → LocationService (expect/actual)
+    ├─ Android: FusedLocationProviderClient
+    └─ iOS: CLLocationManager
+    ↓
+Location { latitude, longitude }
+    ↓
+GetCurrentWeatherUseCase(lat, lon)
+    ↓
+WeatherRepositoryImpl → Open-Meteo API
+    GET https://api.open-meteo.com/v1/forecast?
+        latitude=X&longitude=Y&
+        current=temperature_2m,relative_humidity_2m,
+                apparent_temperature,weather_code,wind_speed_10m
+    ↓
+WeatherResponseDto → toDomain() → Weather
+    ↓
+WeatherState.weather actualizado
+    ↓
+UI muestra: temperatura, condición, humedad, viento
+```
+
+### Open-Meteo API
+
+**API usada:** https://api.open-meteo.com/v1/forecast
+
+**Ventajas:**
+- ✅ Gratuita (sin API key necesaria)
+- ✅ Sin límites para uso personal
+- ✅ Datos actualizados en tiempo real
+- ✅ Documentación completa
+
+**Datos obtenidos:**
+- `temperature_2m` - Temperatura a 2m de altura (°C)
+- `apparent_temperature` - Sensación térmica (°C)
+- `relative_humidity_2m` - Humedad relativa (%)
+- `wind_speed_10m` - Velocidad del viento (km/h)
+- `weather_code` - Código WMO de condición climática
+
+**Mapeo de Códigos WMO:**
+```kotlin
+0 → "Despejado"
+1 → "Mayormente despejado"
+2 → "Parcialmente nublado"
+3 → "Nublado"
+45, 48 → "Niebla"
+51-57 → "Llovizna" / "Llovizna helada"
+61-67 → "Lluvia" / "Lluvia helada"
+71-77 → "Nieve" / "Granizo"
+80-86 → "Chubascos" / "Chubascos de nieve"
+95-99 → "Tormenta" / "Tormenta con granizo"
+```
+
+### Location Service (Expect/Actual)
+
+**Patrón expect/actual para servicios multiplataforma:**
+
+```kotlin
+// commonMain/LocationService.kt
+expect class LocationService {
+    suspend fun getCurrentLocation(): Result<Location>
+}
+```
+
+**Android (FusedLocationProviderClient):**
+- Requiere Google Play Services (`play-services-location:21.3.0`)
+- Permisos: `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`
+- Estrategia: Intenta `lastLocation` primero (rápido), luego `getCurrentLocation`
+- Error handling: Retorna `null` en vez de lanzar excepciones
+- Inyección de dependencias: Recibe `Context` automáticamente por Koin Android
+
+**iOS (CLLocationManager):**
+- Usa CoreLocation framework nativo
+- Permisos: `NSLocationWhenInUseUsageDescription` en Info.plist
+- Implementación con delegate pattern usando coroutines
+- No requiere dependencias externas
+
+### WeatherCard Component
+
+**Estados:**
+1. **Loading:** CircularProgressIndicator + "Obteniendo clima..."
+2. **Error:** Icono + mensaje + botón "Reintentar"
+3. **Success:** 
+   - Header: Ubicación + botón refresh
+   - Temperatura principal (grande)
+   - Sensación térmica
+   - Detalles: Humedad (%) y Viento (km/h)
+
+**Características:**
+- Se carga automáticamente con `LaunchedEffect(Unit)` al montar
+- Botón de refresh manual para actualizar datos
+- Diseño responsivo con Material3
+- Iconos descriptivos (ubicación, humedad, viento)
+
+### Koin DI Module
+
+```kotlin
+val weatherModule = module {
+    // HttpClient para Weather API
+    single<HttpClient>(qualifier = named("weather")) {
+        HttpClient {
+            install(ContentNegotiation) {
+                json(Json {
+                    ignoreUnknownKeys = true
+                    isLenient = true
+                })
+            }
+        }
+    }
+
+    // Location Service (platform-specific)
+    locationServiceModule()
+
+    // Repository
+    single<WeatherRepository> {
+        WeatherRepositoryImpl(
+            httpClient = get(qualifier = named("weather")),
+            locationService = get()
+        )
+    }
+
+    // Use Cases
+    factory { GetLocationUseCase(get()) }
+    factory { GetCurrentWeatherUseCase(get()) }
+
+    // ViewModel
+    viewModel { WeatherViewModel(get(), get()) }
+}
+```
+
+**Platform-specific DI:**
+```kotlin
+// Android
+actual fun locationServiceModule(): Module = module {
+    single { LocationService(get()) } // Context inyectado automáticamente
+}
+
+// iOS
+actual fun locationServiceModule(): Module = module {
+    single { LocationService() } // Sin parámetros
+}
+```
+
+### Setup Completo
+
+**Android:**
+1. Permisos en `AndroidManifest.xml`:
+   ```xml
+   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+   ```
+
+2. Dependencias en `build.gradle.kts`:
+   ```kotlin
+   implementation("com.google.android.gms:play-services-location:21.3.0")
+   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+   ```
+
+**iOS:**
+1. Permisos en `iosApp/Info.plist`:
+   ```xml
+   <key>NSLocationWhenInUseUsageDescription</key>
+   <string>VESTITE necesita acceso a tu ubicación para mostrarte el clima actual</string>
+   ```
+
+**Registro:**
+- Módulo agregado en `App.kt`: `weatherModule`
+- `WeatherCard` integrado en `HomeScreen.kt`
+
+### Notas Importantes
+
+**Multiplataforma:**
+- **Expect/Actual:** Usado para LocationService con diferente DI por plataforma
+- **SecurityException:** No existe en iOS/Native. Usar verificación basada en strings:
+  ```kotlin
+  // ❌ NO funciona en multiplataforma
+  error is SecurityException -> "Permisos denegados"
+  
+  // ✅ Funciona en todas las plataformas
+  error.message?.contains("Permisos", ignoreCase = true) == true -> "Permisos denegados"
+  ```
+
+**Error Handling:**
+- Android LocationService retorna `null` en caso de error en vez de lanzar excepciones
+- ViewModel maneja todos los estados (loading, error, success)
+- Mensajes de error descriptivos según tipo de fallo
+
+**Permisos Runtime:**
+- Android: Los permisos se declaran en manifest, pero runtime prompts manejados por el sistema
+- iOS: Permisos solicitados automáticamente por CLLocationManager al llamar `requestWhenInUseAuthorization()`
+- TODO futuro: Agregar UI para solicitar permisos explícitamente antes de usar LocationService
+
+### Testing
+
+```bash
+./gradlew :androidApp:assembleDebug
+```
+
+**Flujo de prueba:**
+1. Abrir app → Login → HomeScreen
+2. `WeatherCard` se muestra en la parte superior
+3. Loading state aparecer brevemente
+4. Si hay error de permisos: Mensaje + botón reintentar
+5. Si es exitoso: Card muestra temperatura, condición, humedad, viento
+6. Tocar botón refresh actualiza datos
+

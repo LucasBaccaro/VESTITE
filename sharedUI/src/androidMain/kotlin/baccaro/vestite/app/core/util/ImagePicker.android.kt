@@ -3,6 +3,7 @@ package baccaro.vestite.app.core.util
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -11,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
+import androidx.exifinterface.media.ExifInterface
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -94,7 +96,7 @@ actual fun rememberImagePicker(
 }
 
 /**
- * Convierte un URI a ByteArray con compresión automática
+ * Convierte un URI a ByteArray con compresión automática y corrección de rotación EXIF
  * Comprime la imagen para mantenerla bajo 5 MB (límite de Gemini)
  */
 private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
@@ -107,23 +109,53 @@ private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
 
     inputStream.close()
 
+    // Leer orientación EXIF y aplicar rotación si es necesario
+    val rotatedBitmap = try {
+        context.contentResolver.openInputStream(uri)?.use { exifStream ->
+            val exif = ExifInterface(exifStream)
+            val orientation = exif.getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+
+            println("EXIF Orientation: $orientation")
+
+            when (orientation) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> rotateBitmap(originalBitmap, 90f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> rotateBitmap(originalBitmap, 180f)
+                ExifInterface.ORIENTATION_ROTATE_270 -> rotateBitmap(originalBitmap, 270f)
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> flipBitmap(originalBitmap, horizontal = true, vertical = false)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> flipBitmap(originalBitmap, horizontal = false, vertical = true)
+                else -> originalBitmap
+            }
+        } ?: originalBitmap
+    } catch (e: Exception) {
+        println("Warning: Could not read EXIF data: ${e.message}")
+        originalBitmap
+    }
+
+    // Si se aplicó rotación, liberar el bitmap original
+    if (rotatedBitmap !== originalBitmap) {
+        originalBitmap.recycle()
+    }
+
     // Calcular tamaño redimensionado (max 2048x2048 para mantener calidad razonable)
     val maxDimension = 2048
     val scale = minOf(
-        maxDimension.toFloat() / originalBitmap.width,
-        maxDimension.toFloat() / originalBitmap.height,
+        maxDimension.toFloat() / rotatedBitmap.width,
+        maxDimension.toFloat() / rotatedBitmap.height,
         1.0f // No aumentar si ya es pequeña
     )
 
     val resizedBitmap = if (scale < 1.0f) {
-        val newWidth = (originalBitmap.width * scale).toInt()
-        val newHeight = (originalBitmap.height * scale).toInt()
-        println("Resizing image from ${originalBitmap.width}x${originalBitmap.height} to ${newWidth}x${newHeight}")
-        Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true).also {
-            originalBitmap.recycle() // Liberar memoria
+        val newWidth = (rotatedBitmap.width * scale).toInt()
+        val newHeight = (rotatedBitmap.height * scale).toInt()
+        println("Resizing image from ${rotatedBitmap.width}x${rotatedBitmap.height} to ${newWidth}x${newHeight}")
+        Bitmap.createScaledBitmap(rotatedBitmap, newWidth, newHeight, true).also {
+            rotatedBitmap.recycle() // Liberar memoria
         }
     } else {
-        originalBitmap
+        rotatedBitmap
     }
 
     // Comprimir con diferentes calidades hasta que esté bajo 5 MB
@@ -174,4 +206,29 @@ private fun getFileNameFromUri(context: Context, uri: Uri): String? {
         println("Error getting file name: ${e.message}")
         null
     }
+}
+
+/**
+ * Rota un bitmap por el ángulo especificado
+ */
+private fun rotateBitmap(bitmap: Bitmap, degrees: Float): Bitmap {
+    val matrix = Matrix().apply {
+        postRotate(degrees)
+    }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+}
+
+/**
+ * Voltea un bitmap horizontal o verticalmente
+ */
+private fun flipBitmap(bitmap: Bitmap, horizontal: Boolean, vertical: Boolean): Bitmap {
+    val matrix = Matrix().apply {
+        postScale(
+            if (horizontal) -1f else 1f,
+            if (vertical) -1f else 1f,
+            bitmap.width / 2f,
+            bitmap.height / 2f
+        )
+    }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 }

@@ -99,8 +99,5 @@ data class SafetyRating(
 @Serializable
 data class GarmentAnalysisResponse(
     @SerialName("description")
-    val description: String,
-
-    @SerialName("fit")
-    val fit: String
+    val description: String
 )

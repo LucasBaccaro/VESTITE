@@ -21,6 +21,8 @@ koin = "4.0.0"
 koin-compose = "4.0.0"
 navigation-compose = "2.9.1"
 kmpauth = "2.1.0"
+compass = "2.3.0"
+
 
 [libraries]
 
@@ -70,6 +72,12 @@ koin-compose-viewmodel = { module = "io.insert-koin:koin-compose-viewmodel", ver
 navigation-compose = { module = "org.jetbrains.androidx.navigation:navigation-compose", version.ref = "navigation-compose" }
 kmpauth-google = { module = "io.github.mirzemehdi:kmpauth-google", version.ref = "kmpauth" }
 kmpauth-uihelper = { module = "io.github.mirzemehdi:kmpauth-uihelper", version.ref = "kmpauth" }
+compass-geocoder = { module = "dev.jordond.compass:geocoder", version.ref = "compass" }
+compass-geocoder-mobile = { module = "dev.jordond.compass:geocoder-mobile", version.ref = "compass" }
+compass-geolocation = { module = "dev.jordond.compass:geolocation", version.ref = "compass" }
+compass-geolocation-mobile = { module = "dev.jordond.compass:geolocation-mobile", version.ref = "compass" }
+
+
 
 [plugins]
 

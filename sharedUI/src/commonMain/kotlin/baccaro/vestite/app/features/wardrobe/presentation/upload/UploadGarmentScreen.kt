@@ -3,15 +3,20 @@ package baccaro.vestite.app.features.wardrobe.presentation.upload
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -224,6 +229,7 @@ private fun PreviewScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -241,9 +247,9 @@ private fun PreviewScreen(
                     imageLoader = imageLoader,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(1f)
+                        .heightIn(max = 400.dp)
                         .clip(RoundedCornerShape(12.dp)),
-                    contentScale = ContentScale.Crop
+                    contentScale = ContentScale.Fit
                 )
             }
         }
@@ -266,20 +272,6 @@ private fun PreviewScreen(
                     text = state.aiDescription ?: "",
                     style = MaterialTheme.typography.bodyMedium
                 )
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Ajuste: ",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = state.aiFit?.value ?: "",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
             }
         }
 
@@ -289,11 +281,12 @@ private fun PreviewScreen(
             style = MaterialTheme.typography.titleMedium
         )
 
-        Row(
+        LazyRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 0.dp)
         ) {
-            state.categories.forEach { category ->
+            items(state.categories) { category ->
                 FilterChip(
                     selected = state.selectedCategoryId == category.id,
                     onClick = { onCategorySelected(category.id) },

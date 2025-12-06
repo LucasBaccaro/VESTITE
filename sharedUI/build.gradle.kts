@@ -71,6 +71,12 @@ kotlin {
             // KMPAuth - Google Sign-In
             implementation(libs.kmpauth.google)
             implementation(libs.kmpauth.uihelper)
+            
+            // Compass - Geolocation & Geocoding
+            implementation(libs.compass.geocoder)
+            implementation(libs.compass.geocoder.mobile)
+            implementation(libs.compass.geolocation)
+            implementation(libs.compass.geolocation.mobile)
         }
 
         commonTest.dependencies {
@@ -83,6 +89,13 @@ kotlin {
             implementation(libs.compose.ui.tooling)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.ktor.client.okhttp)
+
+            // Google Play Services for Location
+            implementation("com.google.android.gms:play-services-location:21.3.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+
+            // ExifInterface for image rotation handling
+            implementation("androidx.exifinterface:exifinterface:1.3.7")
         }
 
         iosMain.dependencies {

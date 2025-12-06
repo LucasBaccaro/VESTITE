@@ -53,7 +53,7 @@ class UploadGarmentViewModel(
     }
 
     /**
-     * Step 1: Analyze garment with AI and show preview
+     * Step 1: Analyze garment with AI and remove background
      */
     fun analyzeGarment(imageBytes: ByteArray, fileName: String) {
         viewModelScope.launch {
@@ -65,26 +65,50 @@ class UploadGarmentViewModel(
                 )
             }
 
-            garmentRepository.analyzeGarmentImage(imageBytes).fold(
-                onSuccess = { metadata ->
-                    println("Garment analyzed successfully: ${metadata.description}")
+            // Paso 1: Analizar con IA para obtener descripción
+            val analysisResult = garmentRepository.analyzeGarmentImage(imageBytes)
+
+            if (analysisResult.isFailure) {
+                println("Error analyzing garment: ${analysisResult.exceptionOrNull()?.message}")
+                _state.update {
+                    it.copy(
+                        isAnalyzing = false,
+                        error = analysisResult.exceptionOrNull()?.message ?: "Error al analizar la prenda"
+                    )
+                }
+                return@launch
+            }
+
+            val metadata = analysisResult.getOrNull()!!
+            println("Garment analyzed successfully: ${metadata.description}")
+
+            // Paso 2: Remover fondo de la imagen
+            val editResult = garmentRepository.removeBackgroundFromImage(imageBytes)
+
+            editResult.fold(
+                onSuccess = { editedImageBytes ->
+                    println("Background removed successfully, size: ${editedImageBytes.size} bytes")
                     _state.update {
                         it.copy(
                             isAnalyzing = false,
                             showPreview = true,
-                            analyzedImageBytes = imageBytes,
+                            analyzedImageBytes = editedImageBytes, // Usar imagen editada
                             analyzedFileName = fileName,
-                            aiDescription = metadata.description,
-                            aiFit = metadata.fit  // Already a GarmentFit from repository
+                            aiDescription = metadata.description
                         )
                     }
                 },
                 onFailure = { error ->
-                    println("Error analyzing garment: ${error.message}")
+                    println("Error removing background: ${error.message}")
+                    // Si falla la edición, usar imagen original
                     _state.update {
                         it.copy(
                             isAnalyzing = false,
-                            error = error.message ?: "Error al analizar la prenda"
+                            showPreview = true,
+                            analyzedImageBytes = imageBytes, // Fallback a original
+                            analyzedFileName = fileName,
+                            aiDescription = metadata.description,
+                            error = "Advertencia: No se pudo mejorar la imagen, usando original"
                         )
                     }
                 }
@@ -105,9 +129,8 @@ class UploadGarmentViewModel(
         val imageBytes = _state.value.analyzedImageBytes
         val fileName = _state.value.analyzedFileName
         val aiDescription = _state.value.aiDescription
-        val aiFit = _state.value.aiFit
 
-        if (imageBytes == null || fileName == null || aiDescription == null || aiFit == null) {
+        if (imageBytes == null || fileName == null || aiDescription == null) {
             _state.update { it.copy(error = "Datos incompletos") }
             return
         }
@@ -128,8 +151,7 @@ class UploadGarmentViewModel(
                         categoryId = categoryId,
                         imageUrl = imageUrl,
                         metadata = baccaro.vestite.app.features.wardrobe.domain.model.GarmentMetadata(
-                            description = aiDescription,
-                            fit = aiFit  // Already a GarmentFit
+                            description = aiDescription
                         )
                     ).fold(
                         onSuccess = { garment ->

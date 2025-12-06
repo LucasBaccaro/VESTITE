@@ -15,6 +15,11 @@
         </array>
       </dict>
     </array>
+  <!-- Location permissions -->
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>VESTITE necesita acceso a tu ubicación para mostrarte el clima actual</string>
+  <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+  <string>VESTITE necesita acceso a tu ubicación para mostrarte el clima actual</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 </dict>

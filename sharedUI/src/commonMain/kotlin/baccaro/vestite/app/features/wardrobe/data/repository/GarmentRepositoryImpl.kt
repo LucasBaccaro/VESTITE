@@ -35,6 +35,10 @@ class GarmentRepositoryImpl(
         return geminiRepository.analyzeGarmentImage(imageBytes)
     }
 
+    override suspend fun removeBackgroundFromImage(imageBytes: ByteArray): Result<ByteArray> {
+        return geminiRepository.removeBackground(imageBytes)
+    }
+
     @OptIn(ExperimentalTime::class)
     override suspend fun uploadGarmentImage(
         imageBytes: ByteArray,
@@ -78,8 +82,7 @@ class GarmentRepositoryImpl(
                 userId = userId,
                 categoryId = categoryId,
                 imageUrl = imageUrl,
-                aiDescription = metadata.description,
-                aiFit = metadata.fit.value
+                aiDescription = metadata.description
             )
 
             val savedGarment = supabase.from(TABLE_GARMENTS)

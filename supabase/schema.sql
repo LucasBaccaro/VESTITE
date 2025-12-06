@@ -79,7 +79,6 @@ CREATE TABLE IF NOT EXISTS garments (
 
     -- AI-generated metadata (by Gemini Flash)
     ai_description TEXT,
-    ai_fit TEXT DEFAULT 'regular',
 
     -- Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW(),

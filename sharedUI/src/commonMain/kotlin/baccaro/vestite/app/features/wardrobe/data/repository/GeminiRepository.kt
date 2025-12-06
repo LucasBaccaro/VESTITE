@@ -32,6 +32,7 @@ class GeminiRepository(
 
     companion object {
         private const val GEMINI_FLASH_MODEL = "gemini-2.5-flash"
+        private const val GEMINI_FLASH_IMAGE_MODEL = "gemini-2.5-flash-image"
         private const val GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
     }
 
@@ -169,16 +170,175 @@ class GeminiRepository(
         }
     }
 
+    /**
+     * Remueve el fondo de una imagen de prenda usando Gemini Flash Image
+     * Retorna la imagen editada con fondo blanco en base64
+     */
+    suspend fun removeBackground(imageBytes: ByteArray): Result<ByteArray> {
+        return try {
+            // Construir prompt para edición
+            val prompt = buildBackgroundRemovalPrompt()
+
+            // Convertir imagen a base64
+            val base64Image = imageBytes.encodeBase64()
+
+            println("=== GEMINI IMAGE EDIT REQUEST ===")
+            println("Model: $GEMINI_FLASH_IMAGE_MODEL")
+            println("Image size (base64): ${base64Image.length} chars")
+            println("Prompt: $prompt")
+            println("=== END REQUEST ===")
+
+            // Construir request - ORDEN: prompt PRIMERO, imagen DESPUÉS
+            val request = GeminiRequest(
+                contents = listOf(
+                    Content(
+                        parts = listOf(
+                            Part(text = prompt),
+                            Part(inlineData = InlineData(
+                                mimeType = "image/jpeg",
+                                data = base64Image
+                            ))
+                        )
+                    )
+                )
+            )
+
+            // Ejecutar llamada
+            val response = httpClient.post("$GEMINI_API_BASE_URL/$GEMINI_FLASH_IMAGE_MODEL:generateContent") {
+                header("x-goog-api-key", apiKey)
+                contentType(ContentType.Application.Json)
+                setBody(request)
+            }
+
+            // Check HTTP status
+            if (response.status.value !in 200..299) {
+                println("=== GEMINI IMAGE EDIT ERROR ===")
+                println("HTTP Status: ${response.status.value} ${response.status.description}")
+                try {
+                    val errorBody = response.body<String>()
+                    println("Error Response Body:")
+                    println(errorBody)
+                } catch (e: Exception) {
+                    println("Could not read error body: ${e.message}")
+                }
+                println("=== END ERROR ===")
+                throw Exception("API request failed: HTTP ${response.status.value}")
+            }
+
+            // Parsear respuesta
+            val geminiResponse = response.body<GeminiResponse>()
+
+            println("=== GEMINI IMAGE EDIT RESPONSE ===")
+            println("Candidates: ${geminiResponse.candidates?.size ?: 0}")
+            geminiResponse.candidates?.forEachIndexed { index, candidate ->
+                println("Candidate $index:")
+                println("  - finishReason: ${candidate.finishReason}")
+                println("  - content.parts.size: ${candidate.content?.parts?.size}")
+                candidate.content?.parts?.forEachIndexed { partIndex, part ->
+                    println("    Part $partIndex: text=${part.text?.take(50)}, hasInlineData=${part.inlineData != null}")
+                }
+            }
+            println("=== END RESPONSE ===")
+
+            // Check for empty candidates
+            val candidates = geminiResponse.candidates
+            if (candidates.isNullOrEmpty()) {
+                throw Exception("Gemini no retornó candidatos de imagen")
+            }
+
+            // Check finish reason
+            val candidate = candidates.first()
+            when (candidate.finishReason) {
+                "SAFETY" -> throw Exception("Contenido bloqueado por seguridad")
+                "RECITATION" -> throw Exception("Contenido bloqueado por copyright")
+                "MAX_TOKENS" -> throw Exception("Respuesta truncada")
+            }
+
+            // Extract image from response
+            val imagePart = candidate.content?.parts?.firstOrNull { it.inlineData != null }
+            val resultBase64 = imagePart?.inlineData?.data
+
+            if (resultBase64.isNullOrBlank()) {
+                throw Exception("No se pudo extraer la imagen procesada")
+            }
+
+            println("✅ Fondo removido exitosamente, tamaño resultado: ${resultBase64.length} chars")
+
+            // Decodificar base64 a ByteArray
+            val resultBytes = kotlin.io.encoding.Base64.decode(resultBase64)
+
+            Result.success(resultBytes)
+        } catch (e: Exception) {
+            println("GeminiRepository - Error removing background: ${e.message}")
+            e.printStackTrace()
+
+            val errorMessage = when {
+                e.message?.contains("API key", ignoreCase = true) == true -> "API Key inválida"
+                e.message?.contains("quota", ignoreCase = true) == true -> "Límite de API alcanzado"
+                e.message?.contains("safety", ignoreCase = true) == true -> "Imagen bloqueada por filtros de seguridad"
+                else -> "Error al procesar la imagen: ${e.message}"
+            }
+
+            Result.failure(Exception(errorMessage))
+        }
+    }
+
     private fun buildAnalysisPrompt(): String {
         return """
-            Analiza esta prenda de vestir. Retorna un JSON con exactamente estos campos:
-            - description: descripción visual detallada (color, material, tipo, estilo)
-            - fit: tipo de ajuste (debe ser exactamente uno de estos: "tight", "regular", "loose", "oversized")
+            Analiza la imagen y describe ÚNICAMENTE la prenda de vestir principal de forma CONCISA.
 
-            Responde SOLO con el JSON, sin markdown ni texto adicional.
+            Reglas:
+            - Si hay múltiples prendas, enfócate en la MÁS PROMINENTE (la que ocupa más espacio)
+            - Descripción breve: tipo de prenda, color principal, material (si es visible)
+            - Máximo 10-12 palabras
+            - NO describas accesorios secundarios, fondo, ni personas
 
-            Ejemplo:
-            {"description": "Campera de cuero negra tipo biker con cierre metálico", "fit": "regular"}
+            Retorna SOLO un JSON con este campo:
+            - description: descripción concisa de la prenda principal
+
+            Ejemplos:
+            {"description": "Remera de algodón blanca con estampado central"}
+            {"description": "Pantalón jean azul oscuro de corte recto"}
+            {"description": "Zapatillas deportivas blancas con detalles rojos"}
+        """.trimIndent()
+    }
+
+    private fun buildBackgroundRemovalPrompt(): String {
+        return """
+            Eres un editor de imágenes profesional especializado en fotografía de producto.
+
+            TAREA: Edita esta imagen para aislar la prenda/objeto y colocar un fondo blanco puro.
+
+            INSTRUCCIONES CRÍTICAS:
+
+            1. PRESERVACIÓN DEL OBJETO:
+               - Mantén la prenda/objeto EXACTAMENTE como está
+               - NO modifiques colores, texturas, sombras del objeto
+               - NO alteres la forma, tamaño o detalles de la prenda
+               - Conserva todos los pliegues, arrugas y características naturales
+               - Mantén la iluminación y sombras propias del objeto
+
+            2. REMOCIÓN DEL FONDO:
+               - Elimina COMPLETAMENTE el fondo original
+               - Reemplaza con blanco puro (#FFFFFF)
+               - Asegúrate de que no queden restos del fondo anterior
+               - Corta limpiamente los bordes del objeto
+               - Si hay sombras proyectadas en el fondo, elimínalas
+
+            3. BORDES Y RECORTE:
+               - Los bordes del objeto deben quedar limpios y precisos
+               - Mantén detalles finos como costuras, botones, cordones
+               - Si hay partes transparentes o semi-transparentes, manténlas naturales
+
+            4. CALIDAD FINAL:
+               - La prenda debe verse natural sobre el fondo blanco
+               - Sin halos, bordes extraños o artefactos
+               - Alta definición y claridad
+               - Como si fuera una foto profesional de catálogo
+
+            RESULTADO ESPERADO: Una imagen de producto profesional con fondo blanco puro, lista para e-commerce.
+
+            Genera solo la imagen editada, sin texto adicional.
         """.trimIndent()
     }
 

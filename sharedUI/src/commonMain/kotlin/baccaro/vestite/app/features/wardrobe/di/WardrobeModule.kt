@@ -11,6 +11,7 @@ import baccaro.vestite.app.features.wardrobe.domain.usecase.UploadGarmentUseCase
 import baccaro.vestite.app.features.wardrobe.presentation.list.WardrobeListViewModel
 import baccaro.vestite.app.features.wardrobe.presentation.upload.UploadGarmentViewModel
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
@@ -36,6 +37,12 @@ val wardrobeModule = module {
                     prettyPrint = true
                     encodeDefaults = true  // CRITICAL: Include default values in serialization
                 })
+            }
+
+            install(HttpTimeout) {
+                requestTimeoutMillis = 60_000  // 60 segundos para Image Edit
+                connectTimeoutMillis = 15_000  // 15 segundos para conectar
+                socketTimeoutMillis = 60_000   // 60 segundos para socket
             }
 
             install(Logging) {

@@ -1,6 +1,5 @@
 package baccaro.vestite.app.core.presentation.home
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -14,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import baccaro.vestite.app.features.authentication.domain.repository.AuthRepository
+import baccaro.vestite.app.features.weather.presentation.WeatherCard
 import org.koin.compose.koinInject
 
 /**
@@ -24,6 +24,7 @@ import org.koin.compose.koinInject
  * - Profile icon in TopAppBar (top-right) navigates to Profile screen
  * - FAB (+) for quick garment upload
  * - Chat assistant button for AI styling assistance
+ * - Weather card that loads automatically
  *
  * Note: This screen is now inside MainScreen's Scaffold, so it doesn't need its own Scaffold.
  */
@@ -62,7 +63,8 @@ fun HomeScreen(
                     contentDescription = "Agregar prenda"
                 )
             }
-        }
+        },
+        modifier = Modifier.fillMaxSize()
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -70,9 +72,16 @@ fun HomeScreen(
                 .padding(paddingValues)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
             currentUser?.let { user ->
+                // Weather Card - Siempre se muestra, maneja sus propios estados (loading, error, success)
+                WeatherCard(
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
                 Text(
                     text = "¡Bienvenido!",
                     style = MaterialTheme.typography.headlineMedium

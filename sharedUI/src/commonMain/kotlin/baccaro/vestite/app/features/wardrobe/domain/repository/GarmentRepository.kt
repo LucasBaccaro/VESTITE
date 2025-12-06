@@ -11,6 +11,12 @@ interface GarmentRepository {
     suspend fun analyzeGarmentImage(imageBytes: ByteArray): Result<GarmentMetadata>
 
     /**
+     * Removes background from garment image using Gemini Flash Image
+     * @return The edited image with white background as ByteArray
+     */
+    suspend fun removeBackgroundFromImage(imageBytes: ByteArray): Result<ByteArray>
+
+    /**
      * Uploads a garment image to Supabase Storage
      * @return The public URL of the uploaded image
      */

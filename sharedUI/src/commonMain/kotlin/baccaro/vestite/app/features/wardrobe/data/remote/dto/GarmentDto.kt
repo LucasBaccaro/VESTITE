@@ -22,9 +22,6 @@ data class GarmentDto @OptIn(ExperimentalTime::class) constructor(
     @SerialName("ai_description")
     val aiDescription: String? = null,
 
-    @SerialName("ai_fit")
-    val aiFit: String = "regular",
-
     @SerialName("created_at")
     val createdAt: kotlin.time.Instant,
 
@@ -44,8 +41,5 @@ data class InsertGarmentDto(
     val imageUrl: String,
 
     @SerialName("ai_description")
-    val aiDescription: String?,
-
-    @SerialName("ai_fit")
-    val aiFit: String
+    val aiDescription: String?
 )

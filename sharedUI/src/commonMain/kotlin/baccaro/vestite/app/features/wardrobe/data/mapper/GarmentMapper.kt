@@ -2,7 +2,6 @@ package baccaro.vestite.app.features.wardrobe.data.mapper
 
 import baccaro.vestite.app.features.wardrobe.data.remote.dto.GarmentDto
 import baccaro.vestite.app.features.wardrobe.domain.model.Garment
-import baccaro.vestite.app.features.wardrobe.domain.model.GarmentFit
 import kotlin.time.ExperimentalTime
 
 @OptIn(ExperimentalTime::class)
@@ -13,7 +12,6 @@ fun GarmentDto.toDomain(): Garment {
         categoryId = categoryId,
         imageUrl = imageUrl,
         aiDescription = aiDescription,
-        aiFit = GarmentFit.fromValue(aiFit),
         createdAt = createdAt,
         updatedAt = updatedAt
     )
